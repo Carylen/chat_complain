@@ -1,155 +1,214 @@
 import os
 import json
 from openai import OpenAI
+from pydantic import BaseModel
+from typing import Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
 
-
 try:
-    client = OpenAI(
-        api_key=os.getenv("OPEN_API_KEY")
-    )
+    client = OpenAI(api_key=os.getenv("OPEN_API_KEY"))
 except Exception as e:
-    print(f"Error: Tidak dapat menginisialisasi klien OpenAI.")
-    print("Pastikan Anda sudah mengatur OPENAI_API_KEY di file .env")
+    print(f"Error: Unable to initialize OpenAI client.")
+    print("Make sure you have set OPENAI_API_KEY in your .env file")
     exit()
 
-def analyze_complaint_with_llm(user_text: str) -> dict | None:
-    """
-    Mengirim teks komplain ke LLM dan meminta output JSON terstruktur.
-    """
-    system_prompt = """
-        Anda adalah AI Customer Service yang bertugas menganalisis komplain.
-        Tugas Anda adalah mengubah teks komplain yang tidak terstruktur menjadi 
-        data JSON yang terstruktur.
+class Entities(BaseModel):
+    """Entities extracted from the complaint"""
+    amount: Optional[int] = None
+    wrong_number: Optional[str] = None
+    correct_number: Optional[str] = None
+    transaction_id: Optional[str] = None
 
-        Kategori Produk yang valid: [`Pulsa`, `Paket Data`, `Listrik PLN`, `E-Wallet`, `Lainnya`]
-        Kategori Masalah yang valid: [`Produk Belum Diterima`, `Salah Nomor Tujuan`, `Transaksi Gagal`, `Minta Refund`, `Lainnya`]
+class ComplaintAnalysis(BaseModel):
+    """Structure for complaint analysis output"""
+    product_category: str
+    issue_category: str
+    entities: Entities
+    brief_summary: str
 
-        Analisis teks komplain berikut dan berikan output HANYA dalam format JSON.
-        Format JSON harus seperti ini:
-        {
-            "kategori_produk": "...",
-            "kategori_masalah": "...",
-            "entities": {
-                "nominal": (angka dalam integer, 100rb=100000, jika tidak ada = null),
-                "nomor_salah": (string, jika tidak ada = null),
-                "nomor_baru": (string, jika tidak ada = null),
-                "trx_id": (string, jika tidak ada = null)
-            }
-        }
+class ConversationContext:
+    """Manages conversation context to save memory"""
+    
+    def __init__(self, max_messages: int = 5):
+        self.messages: List[dict] = []
+        self.max_messages = max_messages
+        self.complaint_history: List[str] = []  # Summary of previous complaints
+    
+    def add_message(self, role: str, content: str):
+        """Add message to context"""
+        self.messages.append({"role": role, "content": content})
+        self._trim_context()
+    
+    def add_complaint_summary(self, summary: str):
+        """Store complaint summary for reference"""
+        self.complaint_history.append(summary)
+        if len(self.complaint_history) > 3:  # Keep max 3 recent complaints
+            self.complaint_history.pop(0)
+    
+    def _trim_context(self):
+        """Trim old messages to save memory"""
+        if len(self.messages) > self.max_messages:
+            # Always keep system message (index 0)
+            system_msg = self.messages[0] if self.messages[0]["role"] == "system" else None
+            
+            # Get recent messages
+            recent_messages = self.messages[-(self.max_messages-1):]
+            
+            # Recombine
+            if system_msg:
+                self.messages = [system_msg] + recent_messages
+            else:
+                self.messages = recent_messages
+    
+    def get_messages(self) -> List[dict]:
+        """Get messages to send to API"""
+        return self.messages
+    
+    def get_context_summary(self) -> str:
+        """Get context summary to add to prompt"""
+        if not self.complaint_history:
+            return ""
+        
+        return f"\nPrevious complaints: {'; '.join(self.complaint_history)}"
+    
+    def clear(self):
+        """Clear context"""
+        self.messages = []
+        self.complaint_history = []
+
+def analyze_complaint_structured(
+    user_text: str, 
+    context: ConversationContext
+) -> ComplaintAnalysis | None:
     """
+    Analyze complaint using Structured Outputs.
+    More efficient and type-safe compared to regular JSON.
+    """
+    
+    system_prompt = f"""
+        You are an AI Customer Service agent that analyzes customer complaints.
 
-    print(f"\n💬 Menganalisis Teks: '{user_text}'")
+        Product Categories: Mobile Credit, Data Package, PLN Electricity, E-Wallet, Other
+        Issue Categories: Product Not Received, Wrong Destination Number, Transaction Failed, Request Refund, Other
+
+        Extract important information and create a brief summary (max 10 words).
+        {context.get_context_summary()}
+    """
+    
+    print(f"\n💬 Analyzing: '{user_text}'")
+    
     try:
-        # Menggunakan 'gpt-4o' untuk kemampuan pemahaman yang tinggi
-        # Menggunakan 'response_format' untuk menjamin output JSON yang valid
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            response_format={"type": "json_object"},
+        # Using Structured Outputs with parse()
+        completion = client.beta.chat.completions.parse(
+            model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
-            ]
+            ],
+            response_format=ComplaintAnalysis,
         )
         
-        response_content = response.choices[0].message.content
+        # Get parsed object directly (not JSON string)
+        analysis = completion.choices[0].message.parsed
         
-        # Mengubah string JSON dari LLM menjadi dictionary Python
-        structured_data = json.loads(response_content)
-        return structured_data
-
+        # Save summary to context
+        context.add_complaint_summary(analysis.brief_summary)
+        
+        return analysis
+    
     except Exception as e:
-        print(f"Error saat memanggil OpenAI API: {e}")
+        print(f"❌ Error: {e}")
         return None
 
-# ----------------------------------------------------
-# 3. FUNGSI LOGIKA BISNIS (SIMULASI)
-# ----------------------------------------------------
-def handle_automation(data: dict):
-    """
-    Menerima data JSON terstruktur dan memutuskan tindakan apa yang harus diambil.
-    """
+def handle_automation(analysis: ComplaintAnalysis):
+    """Execute business logic based on analysis"""
     
-    print("\n--- 🤖 Menerima Output LLM ---")
-    # Mencetak JSON dengan format yang rapi
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    print("--- 🚀 Menjalankan Logika Bisnis ---")
+    print("\n--- 🤖 Analysis Result ---")
+    print(f"Product: {analysis.product_category}")
+    print(f"Issue: {analysis.issue_category}")
+    print(f"Summary: {analysis.brief_summary}")
+    print(f"Entities: {analysis.entities.model_dump()}")
     
-    try:
-        masalah = data.get("kategori_masalah")
-        entities = data.get("entities", {})
-
-        # Skenario 1: Salah Nomor Tujuan
-        if masalah == "Salah Nomor Tujuan":
-            nomor_baru = entities.get("nomor_baru")
-            nominal = entities.get("nominal")
-            produk = data.get("kategori_produk")
-            
-            if nomor_baru and nominal and produk:
-                print(f"[LOGIC]: Mendeteksi 'Salah Nomor Tujuan'.")
-                print(f"[ACTION]: MEMANGGIL API TRANSAKSI ULANG untuk produk '{produk}' senilai {nominal} ke nomor '{nomor_baru}'.")
-                print("[REPLY]: Siap, transaksi sedang kami proses ulang ke nomor baru {nomor_baru}.")
-            else:
-                print(f"[LOGIC]: 'Salah Nomor Tujuan' terdeteksi, tapi data tidak lengkap.")
-                print("[REPLY]: Baik, Anda ingin kirim ulang ke nomor berapa ya? (Eskalasi data tidak lengkap)")
-
-        # Skenario 2: Minta Refund
-        elif masalah == "Minta Refund":
-            trx_id = entities.get("trx_id")
-            if trx_id:
-                print(f"[LOGIC]: Mendeteksi 'Minta Refund' untuk TRX ID: {trx_id}.")
-                print(f"[ACTION]: MEMANGGIL API REFUND untuk transaksi {trx_id}.")
-                print("[REPLY]: Baik, permintaan refund untuk transaksi {trx_id} sedang kami proses.")
-            else:
-                print(f"[LOGIC]: 'Minta Refund' terdeteksi, tapi TRX ID tidak ada.")
-                print("[REPLY]: Mohon info nomor transaksi (TRX ID) yang ingin di-refund. (Eskalasi data tidak lengkap)")
-        
-        # Skenario 3: Produk Belum Diterima
-        elif masalah == "Produk Belum Diterima":
-            trx_id = entities.get("trx_id")
-            print(f"[LOGIC]: Mendeteksi 'Produk Belum Diterima' (TRX ID: {trx_id or 'N/A'}).")
-            print(f"[ACTION]: MEMANGGIL API CEK STATUS untuk transaksi {trx_id or 'N/A'}.")
-            print("[REPLY]: Mohon ditunggu, sedang kami cek status transaksinya ya.")
-        
-        # Skenario Lainnya
+    print("\n--- 🚀 Logic Execution ---")
+    
+    issue = analysis.issue_category
+    entities = analysis.entities
+    
+    # Scenario 1: Wrong Destination Number
+    if issue == "Wrong Destination Number":
+        if entities.correct_number and entities.amount:
+            print(f"✅ [ACTION]: Retry transaction {analysis.product_category} ${entities.amount:,}")
+            print(f"   From: {entities.wrong_number or 'N/A'} → To: {entities.correct_number}")
+            print(f"   [REPLY]: Transaction is being processed to {entities.correct_number}.")
         else:
-            print(f"[LOGIC]: Kategori tidak terdefinisi ('{masalah}').")
-            print("[ACTION]: Eskalasi ke agen CS.")
-            print("[REPLY]: Mohon ditunggu, tim CS kami akan segera membantu Anda.")
-            
-    except Exception as e:
-        print(f"Error pada logika bisnis: {e}")
-        print("[ACTION]: Eskalasi ke agen CS karena error sistem.")
+            print("⚠️  [ACTION]: Escalate - Incomplete data")
+            print("   [REPLY]: Please provide the correct destination number.")
+    
+    # Scenario 2: Request Refund
+    elif issue == "Request Refund":
+        if entities.transaction_id:
+            print(f"✅ [ACTION]: Process refund for TRX {entities.transaction_id}")
+            print(f"   [REPLY]: Refund for transaction {entities.transaction_id} is being processed.")
+        else:
+            print("⚠️  [ACTION]: Escalate - Transaction ID not found")
+            print("   [REPLY]: Please provide the transaction number for refund.")
+    
+    # Scenario 3: Product Not Received
+    elif issue == "Product Not Received":
+        trx_id = entities.transaction_id or "N/A"
+        print(f"✅ [ACTION]: Check transaction status {trx_id}")
+        print(f"   [REPLY]: We are checking your transaction status.")
+    
+    # Other scenarios
+    else:
+        print("⚠️  [ACTION]: Escalate to CS agent")
+        print(f"   [REPLY]: Our CS team will assist you shortly.")
 
-# ----------------------------------------------------
-# 4. CONTOH EKSEKUSI
-# ----------------------------------------------------
+
 if __name__ == "__main__":
     
-    print("========================================")
-    print("Contoh 1: Komplain Salah Nomor (Lengkap)")
-    complaint_1 = "Kak, sy salah kirim pulsa 100rb ke 0812111. Harusnya ke 081999. ID transaksinya T5566. Bisa dibantu?"
+    # Initialize context manager
+    context = ConversationContext(max_messages=5)
     
-    data_1 = analyze_complaint_with_llm(complaint_1)
-    if data_1:
-        handle_automation(data_1)
-
-    # --- Contoh 2: Komplain refund (data kurang) ---
-    print("\n========================================")
-    print("Contoh 2: Komplain Refund (Data Kurang)")
-    complaint_2 = "plsa 50rb saya gagal, tolong refund aja."
+    print("="*50)
+    print("DEMO: Customer Service with Structured Outputs")
+    print("="*50)
     
-    data_2 = analyze_complaint_with_llm(complaint_2)
-    if data_2:
-        handle_automation(data_2)
-
-    # --- Contoh 3: Komplain produk belum masuk (typo) ---
-    print("\n========================================")
-    print("Contoh 3: Produk Belum Diterima (Typo)")
-    complaint_3 = "mas, token listrik 20k sy kok blm msk ya? ID: L9987"
+    # Example 1: Complete complaint
+    print("\n[1] Wrong Number Complaint")
+    complaint_1 = "Hi, I sent $100 mobile credit to 0812111 by mistake. Should be 081999. ID: T5566"
     
-    data_3 = analyze_complaint_with_llm(complaint_3)
-    if data_3:
-        handle_automation(data_3)
+    analysis_1 = analyze_complaint_structured(complaint_1, context)
+    if analysis_1:
+        handle_automation(analysis_1)
+    
+    # Example 2: Refund complaint
+    print("\n" + "="*50)
+    print("\n[2] Refund Request")
+    complaint_2 = "My $50 mobile credit failed, please refund."
+    
+    analysis_2 = analyze_complaint_structured(complaint_2, context)
+    if analysis_2:
+        handle_automation(analysis_2)
+    
+    # Example 3: Follow-up with context
+    print("\n" + "="*50)
+    print("\n[3] Follow-up (with context)")
+    complaint_3 = "The TRX ID is T9988"
+    
+    analysis_3 = analyze_complaint_structured(complaint_3, context)
+    if analysis_3:
+        handle_automation(analysis_3)
+    
+    # Display context summary
+    print("\n" + "="*50)
+    print("\n📊 Context Summary:")
+    print(f"Total complaints processed: {len(context.complaint_history)}")
+    print(f"Summary: {context.complaint_history}")
+    
+    # Demo clear context
+    print("\n🧹 Clearing context...")
+    context.clear()
+    print(f"Context after clear: {len(context.complaint_history)} complaints")
