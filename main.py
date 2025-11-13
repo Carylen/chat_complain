@@ -3,51 +3,43 @@ import json
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 1. PENGATURAN KLIEN
-# ----------------------------------------------------
-# Memuat environment variable (OPENAI_API_KEY) dari file .env
 load_dotenv()
 
-# Inisialisasi klien OpenAI
-# Klien akan secara otomatis membaca OPENAI_API_KEY dari environment
+
 try:
-    client = OpenAI()
+    client = OpenAI(
+        api_key=os.getenv("OPEN_API_KEY")
+    )
 except Exception as e:
     print(f"Error: Tidak dapat menginisialisasi klien OpenAI.")
     print("Pastikan Anda sudah mengatur OPENAI_API_KEY di file .env")
     exit()
 
-# ----------------------------------------------------
-# 2. FUNGSI ANALISIS (CORE LLM)
-# ----------------------------------------------------
 def analyze_complaint_with_llm(user_text: str) -> dict | None:
     """
     Mengirim teks komplain ke LLM dan meminta output JSON terstruktur.
     """
-    
-    # Ini adalah "otak" dari sistem Anda.
-    # Prompt ini menginstruksikan LLM cara berperilaku dan format output.
     system_prompt = """
-Anda adalah AI Customer Service yang bertugas menganalisis komplain.
-Tugas Anda adalah mengubah teks komplain yang tidak terstruktur menjadi 
-data JSON yang terstruktur.
+        Anda adalah AI Customer Service yang bertugas menganalisis komplain.
+        Tugas Anda adalah mengubah teks komplain yang tidak terstruktur menjadi 
+        data JSON yang terstruktur.
 
-Kategori Produk yang valid: [`Pulsa`, `Paket Data`, `Listrik PLN`, `E-Wallet`, `Lainnya`]
-Kategori Masalah yang valid: [`Produk Belum Diterima`, `Salah Nomor Tujuan`, `Transaksi Gagal`, `Minta Refund`, `Lainnya`]
+        Kategori Produk yang valid: [`Pulsa`, `Paket Data`, `Listrik PLN`, `E-Wallet`, `Lainnya`]
+        Kategori Masalah yang valid: [`Produk Belum Diterima`, `Salah Nomor Tujuan`, `Transaksi Gagal`, `Minta Refund`, `Lainnya`]
 
-Analisis teks komplain berikut dan berikan output HANYA dalam format JSON.
-Format JSON harus seperti ini:
-{
-  "kategori_produk": "...",
-  "kategori_masalah": "...",
-  "entities": {
-    "nominal": (angka dalam integer, 100rb=100000, jika tidak ada = null),
-    "nomor_salah": (string, jika tidak ada = null),
-    "nomor_baru": (string, jika tidak ada = null),
-    "trx_id": (string, jika tidak ada = null)
-  }
-}
-"""
+        Analisis teks komplain berikut dan berikan output HANYA dalam format JSON.
+        Format JSON harus seperti ini:
+        {
+            "kategori_produk": "...",
+            "kategori_masalah": "...",
+            "entities": {
+                "nominal": (angka dalam integer, 100rb=100000, jika tidak ada = null),
+                "nomor_salah": (string, jika tidak ada = null),
+                "nomor_baru": (string, jika tidak ada = null),
+                "trx_id": (string, jika tidak ada = null)
+            }
+        }
+    """
 
     print(f"\n💬 Menganalisis Teks: '{user_text}'")
     try:
@@ -136,7 +128,6 @@ def handle_automation(data: dict):
 # ----------------------------------------------------
 if __name__ == "__main__":
     
-    # --- Contoh 1: Komplain salah nomor (lengkap) ---
     print("========================================")
     print("Contoh 1: Komplain Salah Nomor (Lengkap)")
     complaint_1 = "Kak, sy salah kirim pulsa 100rb ke 0812111. Harusnya ke 081999. ID transaksinya T5566. Bisa dibantu?"
