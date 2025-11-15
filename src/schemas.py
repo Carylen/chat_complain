@@ -50,6 +50,8 @@ class Entities(BaseModel):
     wrong_number: Optional[str] = None
     correct_number: Optional[str] = None
     transaction_id: Optional[str] = None
+    refund_method: Optional[str] = None  # e-wallet / bank
+    refund_destination: Optional[str] = None
 
 class ComplaintAnalysis(BaseModel):
     """Structure for complaint analysis output"""
