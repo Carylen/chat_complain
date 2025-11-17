@@ -33,7 +33,7 @@ Centralizes all configuration, constants, and environment variables.
 """
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     # OpenAI Configuration
-    openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
+    openai_api_key: str = Field(default="OPENAI_API_KEY", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
     
     # Context Configuration
@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # Application Configuration
     debug_mode: bool = Field(default=False, alias="DEBUG_MODE")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    google_chat_finance_webhook: Optional[str] = Field(default=None, alias="GOOGLE_CHAT_FINANCE_WEBHOOK")
     
     # WhatsApp Configuration
     whatsapp_enabled: bool = Field(default=True, alias="WHATSAPP_ENABLED")
@@ -290,7 +292,8 @@ class AutomationRules:
             "auto_resolve": False
         },
         "Request Refund": {
-            "required_fields": ["transaction_id"],
+            # "required_fields": ["transaction_id"],
+            "required_fields": ["transaction_id", "refund_method", "refund_destination"],
             "api_endpoint": "/api/refund/process",
             "escalate_if_missing": True,
             "show_faq": True,

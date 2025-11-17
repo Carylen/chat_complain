@@ -123,9 +123,9 @@ class ComplaintProcessor:
                 print(f"  - {key}: {value}")
         
         print(f"\n💰 TOKEN USAGE")
-        print(f"Input:  {usage.input_tokens:,} tokens")
-        print(f"Output: {usage.output_tokens:,} tokens")
-        print(f"Total:  {usage.total_tokens:,} tokens")
+        print(f"Input:  {usage.input_token:,} tokens")
+        print(f"Output: {usage.output_token:,} tokens")
+        print(f"Total:  {usage.total_token:,} tokens")
         
         # Calculate cost
         costs = self.openai_service.estimate_cost(usage)
@@ -244,16 +244,22 @@ def run_demo():
             print("\n❌ Failed to process complaint")
         
         # Add separator between test cases
-        if i < len(test_complaints):
-            input("\n\nPress Enter to continue to next test case...")
+        # if i < len(test_complaints):
+        #     input("\n\nPress Enter to continue to next test case...")
     
     # Display final summary
     print("\n\n" + "="*70)
     print("📊 SESSION SUMMARY")
     print("="*70)
     context_info = processor.get_context_info()
+    token_usage = processor.automation_service.token_usage
     print(f"Total complaints processed: {len(context_info['complaint_history'])}")
     print(f"Context state: {context_info['context_repr']}")
+    print("\n\n" + "="*70)
+    print(f"\n💰 TOKEN USAGE")
+    print(f"Input:  {token_usage.get("input_token")} tokens")
+    print(f"Output: {token_usage.get("output_token")} tokens")
+    print(f"Total:  {token_usage.get("total_token")} tokens")
     
     print("\n" + "="*70)
     print(" "*25 + "DEMO COMPLETED")

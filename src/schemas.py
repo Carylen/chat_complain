@@ -61,9 +61,9 @@ class ComplaintAnalysis(BaseModel):
     brief_summary: str
 
 class TokenUsage(BaseModel):
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+    input_token: int
+    output_token: int
+    total_token: int
     
     def cost_estimate(self, model: str) -> dict:
         """Calculate cost estimate based on model pricing"""
@@ -72,13 +72,13 @@ class TokenUsage(BaseModel):
         if not input_token_price or not output_token_price:
             raise ValueError(f"Model '{model}' Not Found.")
         
-        input_cost = self.input_tokens * input_token_price
-        output_cost = self.output_tokens * output_token_price
+        input_cost = self.input_token * input_token_price
+        output_cost = self.output_token * output_token_price
         
         return {
-            "input_token": self.input_tokens,
-            "output_token": self.output_tokens,
-            "total_token": self.total_tokens,
+            "input_token": self.input_token,
+            "output_token": self.output_token,
+            "total_token": self.total_token,
             "input_cost": round(input_cost, 6),
             "output_cost": round(output_cost, 6),
             "total_cost": round(input_cost + output_cost, 6)

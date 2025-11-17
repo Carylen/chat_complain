@@ -34,14 +34,7 @@ class OpenAIService:
         """
         self.api_key = api_key or settings.openai_api_key
         self.model = model or settings.openai_model
-        self.token_usage = {
-            "input_token": 0,
-            "output_token": 0,
-            "total_token": 0,
-            "input_cost": 0.0,
-            "output_cost": 0.0,
-            "total_cost": 0.0
-        }
+        
         
         try:
             self.client = OpenAI(api_key=self.api_key)
@@ -81,13 +74,13 @@ class OpenAIService:
                 input=user_text,
                 text_format=ComplaintAnalysis,
             )
-            
+            logger.info(response)
             # Extract analysis and usage
             analysis = response.output_parsed
             usage = TokenUsage(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.total_tokens
+                input_token=response.usage.input_tokens,
+                output_token=response.usage.output_tokens,
+                total_token=response.usage.total_tokens
             )
             
             # Calculate duration
@@ -97,7 +90,7 @@ class OpenAIService:
             logger.log_api_call(
                 endpoint="beta.chat.completions.parse",
                 model=self.model,
-                tokens_used=usage.total_tokens,
+                tokens_used=usage.total_token,
                 duration=duration
             )
             
@@ -134,10 +127,7 @@ class OpenAIService:
         Returns:
             Dictionary with cost breakdown
         """
-        new_costs = usage.cost_estimate(self.model)
-        for key in self.token_usage:
-            self.token_usage[key] += new_costs[key]
-        return new_costs
+        return usage.cost_estimate(self.model)
     
     def change_model(self, model: str) -> None:
         """

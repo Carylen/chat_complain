@@ -9,13 +9,13 @@ from typing import Dict, Any, Optional
 from uuid import uuid4
 import sys
 import os
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
 from src.schemas import ComplaintAnalysis, TokenUsage
 from src.utils.logger import get_logger
 from src.config import AutomationRules, settings
+from src.services import notification_service, openai_service
+from src.utils import provider_utils
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 
 logger = get_logger(__name__, settings.log_level)
@@ -54,7 +54,17 @@ class AutomationService:
     def __init__(self):
         """Initialize automation service"""
         logger.info("Automation service initialized")
-    
+        self.notification_service: notification_service.NotificationService = notification_service.create_notification_service()
+        self.openai_service = openai_service.create_openai_service()
+        self.token_usage = {
+            "input_token": 0,
+            "output_token": 0,
+            "total_token": 0,
+            "input_cost": 0.0,
+            "output_cost": 0.0,
+            "total_cost": 0.0
+        }
+
     def process_complaint(
         self,
         analysis: ComplaintAnalysis,
@@ -77,6 +87,9 @@ class AutomationService:
             action_taken="Processing"
         )
         
+        cost_breakdown = self.openai_service.estimate_cost(usage)
+        for key in self.token_usage:
+            self.token_usage[key] += cost_breakdown.get(key, 0)
         # Get automation configuration for this issue
         config = AutomationRules.get_action_config(analysis.issue_category)
         
@@ -139,6 +152,26 @@ class AutomationService:
     ) -> AutomationAction:
         """Handle wrong destination number scenario"""
         entities = analysis.entities
+
+        # New BEGIN
+        if not entities.wrong_number:
+            entities.wrong_number = self._get_old_number_from_trx(entities.transaction_id)
+        
+        old_provider = provider_utils.detect_provider(entities.wrong_number)
+        new_provider = provider_utils.detect_provider(entities.correct_number)
+
+        # 2. Sesuaikan nominal jika provider berbeda
+        adjusted_amount = provider_utils.adjust_nominal_equivalent(
+            entities.amount,
+            old_provider,
+            new_provider
+        )
+
+        logger.info(
+            f"Provider changed: {old_provider} -> {new_provider}. "
+            f"Amount adjusted: {entities.amount} -> {adjusted_amount}"
+        )
+        # New END
         
         payload = {
             "product": analysis.product_category,
@@ -175,6 +208,23 @@ class AutomationService:
         }
         
         logger.info(f"Processing refund for transaction: {entities.transaction_id}")
+
+        try:
+            alert_message = f"""
+            🔔 **New Refund Request** 🔔
+
+            **Transaction ID**: {entities.transaction_id}
+            **Amount**: {entities.amount}
+            **Method**: {entities.refund_method}
+            **Destination**: {entities.refund_destination}
+            **Reason**: {analysis.brief_summary}
+
+            Please process via ticketing system (API call /api/refund/process was triggered).
+            """
+            self.notification_service.send_finance_alert(alert_message)
+        except Exception as e:
+            logger.error(f"Failed to send finance alert during refund handling: {e}")
+        # --- LOGIKA BARU SELESAI ---
         
         return AutomationAction(
             action_type="PROCESS_REFUND",
@@ -234,6 +284,13 @@ class AutomationService:
         reason: Any
     ) -> AutomationAction:
         """Create escalation action for CS agent"""
+        action_type = "ESCALATE"
+        endpoint = "/api/escalate"
+        
+        if isinstance(reason, list) and len(reason) > 0:
+            if "refund_method" in reason or "refund_destination" in reason:
+                action_type = "REQUEST_INFORMATION"
+        
         payload = {
             "product": analysis.product_category,
             "issue": analysis.issue_category,
@@ -244,8 +301,8 @@ class AutomationService:
         logger.warning(f"Escalating complaint: {reason}")
         
         return AutomationAction(
-            action_type="ESCALATE",
-            endpoint="/api/escalate",
+            action_type=action_type,
+            endpoint=endpoint,
             payload=payload,
             requires_escalation=True
         )
@@ -285,6 +342,25 @@ class AutomationService:
         }
         
         return messages.get(action.action_type, "Your request is being processed.")
+    
+    def _get_old_number_from_trx(self, transaction_id: Optional[str]) -> str:
+        """
+        Helper untuk mengambil nomor telepon lama dari ID transaksi.
+        INI HARUS DIGANTI DENGAN LOGIKA DATABASE/API ANDA.
+        """
+        logger.info(f"Mencari nomor lama untuk TRX ID: {transaction_id} (placeholder)")
+        
+        # --- GANTI LOGIKA INI ---
+        # Contoh:
+        # try:
+        #   transaction_data = your_database.get_transaction(transaction_id)
+        #   return transaction_data.phone_number
+        # except Exception:
+        #   logger.error("Gagal mengambil data transaksi")
+        #   return None
+        
+        # Untuk saat ini, kita kembalikan nomor palsu untuk tes
+        return "08111111111"
 
 
 def create_automation_service() -> AutomationService:

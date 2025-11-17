@@ -1,6 +1,8 @@
 # src/utils/provider_utils.py
 
-def detect_provider(phone_number: str) -> str:
+from typing import Optional
+
+def detect_provider(phone_number: Optional[str]) -> str:
     if not phone_number:
         return "Unknown"
     if phone_number.startswith(("0811", "0812", "0813")):
